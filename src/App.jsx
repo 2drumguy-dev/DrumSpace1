@@ -1,86 +1,51 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
-// DRUM_MAP connects note numbers to drum names
-// example: when you hit your snare, DTX sends note 38
-// so we write 38: 'Snare' here
-// we will fill this in tonight after testing with your kit!
-const DRUM_MAP = {
-  // 38: 'Snare',
-  // 36: 'Kick',
-  // 42: 'Hi-Hat Closed',
-  // we will add your real DTX 532 numbers here
-}
+const DRUM_MAP = {}
 
 function App() {
-  // hits = the list of drum hits that appear on screen
   const [hits, setHits] = useState([])
-
-  // status = the text that shows connection state to the user
   const [status, setStatus] = useState('Not connected')
-
-  // midi = stores the MIDI connection so we can disconnect later
-  const [midi, setMidi] = useState(null)
+  const [connected, setConnected] = useState(false)
+  const midiRef = useRef(null)
 
   function connectDrumKit() {
-    // requestMIDIAccess asks the browser for permission to use MIDI devices
-    // this is what triggers the popup asking "Allow MIDI access?"
     navigator.requestMIDIAccess().then(function(midiAccess) {
+      midiRef.current = midiAccess
+      setConnected(true)
       setStatus('Connected! Hit a pad...')
 
-      // save the midi connection in state so disconnect button can use it
-      setMidi(midiAccess)
-
-      // loop through all connected MIDI devices (your DTX 532 will be one of them)
       midiAccess.inputs.forEach(function(input) {
+        console.log('Attaching listener to:', input.name)
 
-        // onmidimessage fires every time a pad is hit
         input.onmidimessage = function(msg) {
+          if (msg.data[0] >= 248) return
 
-          // msg.data contains 3 numbers:
-          // command = type of MIDI message (144 = note on = pad hit)
-          // note = which pad was hit (each pad has a unique number)
-          // velocity = how hard you hit it (0-127)
           const [command, note, velocity] = msg.data
+          console.log('MIDI message:', command, note, velocity)
 
-          // we only care about "note on" messages with velocity > 0
-          // velocity 0 means pad was released, we ignore that
-          if (command === 144 && velocity > 0) {
-
-            // look up the drum name in our map
-            // if we don't know the note yet show "Unknown pad (note: X)"
+          if ((command === 144 || command === 153) && velocity > 0) {
             const drumName = DRUM_MAP[note] || `Unknown pad (note: ${note})`
-
-            // add the new hit to the top of the list
-            // slice(0, 29) keeps only the last 30 hits so the list doesn't grow forever
             setHits(prev => [
-              {
-                drumName,
-                note,
-                velocity,
-                time: new Date().toLocaleTimeString()
-              },
+              { drumName, note, velocity, time: new Date().toLocaleTimeString() },
               ...prev.slice(0, 29)
             ])
           }
         }
       })
-    }).catch(function() {
-      // if browser doesn't support Web MIDI (Firefox, Safari) show this message
+    }).catch(function(err) {
+      console.log('MIDI error:', err)
       setStatus('MIDI not supported - use Chrome!')
     })
   }
 
   function disconnectDrumKit() {
-    if (midi) {
-      // remove the message listener from every MIDI input
-      // this stops the app from receiving drum hits
-      midi.inputs.forEach(function(input) {
+    if (midiRef.current) {
+      midiRef.current.inputs.forEach(function(input) {
         input.onmidimessage = null
       })
+      midiRef.current = null
     }
-
-    // reset everything back to the starting state
-    setMidi(null)
+    setConnected(false)
     setHits([])
     setStatus('Not connected')
   }
@@ -88,32 +53,25 @@ function App() {
   return (
     <div style={{ padding: '40px', fontFamily: 'monospace' }}>
       <h1>🥁 DrumSpace MIDI Test</h1>
-
-      {/* shows current connection status */}
       <p>Status: <strong>{status}</strong></p>
 
-      {/* button row */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-
-        {/* connect button - disabled if already connected */}
         <button
           onClick={connectDrumKit}
-          disabled={!!midi}
+          disabled={connected}
           style={{ padding: '10px 20px', cursor: 'pointer' }}
         >
           Connect Drum Kit
         </button>
 
-        {/* disconnect button - disabled if not connected */}
         <button
           onClick={disconnectDrumKit}
-          disabled={!midi}
+          disabled={!connected}
           style={{ padding: '10px 20px', cursor: 'pointer' }}
         >
           Disconnect
         </button>
 
-        {/* clear button - just empties the hits list */}
         <button
           onClick={() => setHits([])}
           style={{ padding: '10px 20px', cursor: 'pointer' }}
@@ -122,16 +80,12 @@ function App() {
         </button>
       </div>
 
-      {/* instruction text for tonight's testing */}
       <p style={{ color: '#888' }}>
-        Hit each pad one by one and note down the number next to "note:" — we will use these tonight!
+        Hit each pad one by one and note down the number next to "note:"
       </p>
 
-      {/* list of drum hits */}
       <div style={{ marginTop: '10px' }}>
         {hits.map((hit, i) => (
-          // most recent hit (i === 0) gets highlighted in dark green
-          // older hits get a light grey background
           <div
             key={i}
             style={{
