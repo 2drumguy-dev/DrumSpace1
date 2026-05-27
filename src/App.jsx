@@ -1,27 +1,54 @@
-import { useState, useRef } from 'react'
+// Import necessary libraries and components
+import { useState, useRef, useEffect } from 'react'
+import { Midi } from '@tonejs/midi'
+import SongPlayer from './SongPlayer'
 
-const DRUM_MAP = {}
+// Map MIDI note numbers to drum names
+const DRUM_MAP = {
+  38: 'Snare',
+  40: 'Snare',
+  48: 'Tom 1',
+  47: 'Tom 2',
+  43: 'Floor Tom',
+  42: 'Closed Hi-Hat',
+  46: 'Open Hi-Hat',
+  49: 'Crash',
+  51: 'Ride',
+  35: 'Bass Kick',
+  36: 'Bass Kick',
+}
 
 function App() {
+  // State variables for song, MIDI connection, drum hits, and status
+  const [song, setSong] = useState(null)
+  const midiRef = useRef(null)
+  const [connected, setConnected] = useState(false)
   const [hits, setHits] = useState([])
   const [status, setStatus] = useState('Not connected')
-  const [connected, setConnected] = useState(false)
-  const midiRef = useRef(null)
 
+  // Load the MIDI file and parse it
+  useEffect(() => {
+    fetch('/src/assets/songs/Bites-The-Dust-1.mid')
+      .then(res => res.arrayBuffer())
+      .then(buffer => {
+        const midi = new Midi(buffer)
+        setSong(midi)
+      })
+  }, [])
+
+  // Connect to the drum kit via MIDI
   function connectDrumKit() {
-    navigator.requestMIDIAccess().then(function(midiAccess) {
+    navigator.requestMIDIAccess().then(midiAccess => {
       midiRef.current = midiAccess
       setConnected(true)
       setStatus('Connected! Hit a pad...')
 
-      midiAccess.inputs.forEach(function(input) {
-        console.log('Attaching listener to:', input.name)
-
-        input.onmidimessage = function(msg) {
+      // Listen for MIDI messages
+      midiAccess.inputs.forEach(input => {
+        input.onmidimessage = msg => {
           if (msg.data[0] >= 248) return
 
           const [command, note, velocity] = msg.data
-          console.log('MIDI message:', command, note, velocity)
 
           if ((command === 144 || command === 153) && velocity > 0) {
             const drumName = DRUM_MAP[note] || `Unknown pad (note: ${note})`
@@ -32,15 +59,13 @@ function App() {
           }
         }
       })
-    }).catch(function(err) {
-      console.log('MIDI error:', err)
-      setStatus('MIDI not supported - use Chrome!')
     })
   }
 
+  // Disconnect from the drum kit
   function disconnectDrumKit() {
     if (midiRef.current) {
-      midiRef.current.inputs.forEach(function(input) {
+      midiRef.current.inputs.forEach(input => {
         input.onmidimessage = null
       })
       midiRef.current = null
@@ -52,38 +77,31 @@ function App() {
 
   return (
     <div style={{ padding: '40px', fontFamily: 'monospace' }}>
-      <h1>🥁 DrumSpace MIDI Test</h1>
+      <h1>🥁 DrumSpace</h1>
+
+      {/* Display song information if loaded */}
+      {song && (
+        <p style={{ color: 'green' }}>
+          ✅ Song loaded! BPM: {Math.round(song.header.tempos[0].bpm)} | Tracks: {song.tracks.length}
+        </p>
+      )}
+
       <p>Status: <strong>{status}</strong></p>
 
+      {/* Buttons for connecting, disconnecting, and clearing hits */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-        <button
-          onClick={connectDrumKit}
-          disabled={connected}
-          style={{ padding: '10px 20px', cursor: 'pointer' }}
-        >
+        <button onClick={connectDrumKit} disabled={connected} style={{ padding: '10px 20px', cursor: 'pointer' }}>
           Connect Drum Kit
         </button>
-
-        <button
-          onClick={disconnectDrumKit}
-          disabled={!connected}
-          style={{ padding: '10px 20px', cursor: 'pointer' }}
-        >
+        <button onClick={disconnectDrumKit} disabled={!connected} style={{ padding: '10px 20px', cursor: 'pointer' }}>
           Disconnect
         </button>
-
-        <button
-          onClick={() => setHits([])}
-          style={{ padding: '10px 20px', cursor: 'pointer' }}
-        >
+        <button onClick={() => setHits([])} style={{ padding: '10px 20px', cursor: 'pointer' }}>
           Clear
         </button>
       </div>
 
-      <p style={{ color: '#888' }}>
-        Hit each pad one by one and note down the number next to "note:"
-      </p>
-
+      {/* Display the list of drum hits */}
       <div style={{ marginTop: '10px' }}>
         {hits.map((hit, i) => (
           <div
@@ -100,6 +118,9 @@ function App() {
           </div>
         ))}
       </div>
+
+      {/* Render the SongPlayer component */}
+      <SongPlayer song={song} drumHits={hits} />
     </div>
   )
 }
