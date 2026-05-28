@@ -1,9 +1,5 @@
-// Import necessary React hooks
 import { useEffect, useRef, useState } from 'react'
-// Import Tone.js for audio playback
-import * as Tone from 'tone'
 
-// Define colors for each drum lane
 const LANE_COLORS = {
   'Closed Hi-Hat': '#4A90D9',
   'Snare': '#E74C3C',
@@ -16,7 +12,6 @@ const LANE_COLORS = {
   'Ride': '#F39C12',
 }
 
-// Define the order of drum lanes
 const LANES = [
   'Crash',
   'Closed Hi-Hat',
@@ -28,21 +23,12 @@ const LANES = [
   'Bass Kick',
 ]
 
-// Constants for lane and note dimensions
 const LANE_HEIGHT = 50
 const NOTE_WIDTH = 30
 const HIT_LINE_X = 200
 const SCROLL_SPEED = 200
 
-// Helper function to get the current time in seconds
-function nowSeconds() {
-  if (typeof globalThis !== 'undefined' && globalThis.performance?.now) {
-    return globalThis.performance.now() / 1000
-  }
-  return Date.now() / 1000
-}
-
-// Map MIDI note numbers to drum names
+// map MIDI note numbers to drum names
 function getDrumName(midi) {
   const map = {
     38: 'Snare', 40: 'Snare',
@@ -55,95 +41,109 @@ function getDrumName(midi) {
   return map[midi] || null
 }
 
-export default function SongPlayer({ song, drumHits }) {
-  // Refs for canvas, animation, and start time
+export default function SongPlayer({ song, drumHits, midiOffset = 0 }) {
   const canvasRef = useRef(null)
   const animationRef = useRef(null)
+  const audioRef = useRef(null)
   const startTimeRef = useRef(null)
   const [playing, setPlaying] = useState(false)
   const notesRef = useRef([])
-  const synthRef = useRef(null) // Ref to store the Tone.PolySynth instance
 
-  // Parse the song and extract drum notes
+  // parse drum notes when song loads
   useEffect(() => {
     if (!song) return
-
     const drumTrack = song.tracks[18]
-
     notesRef.current = drumTrack.notes.map(note => ({
-      time: note.time,
+      time: note.time - midiOffset,
       midi: note.midi,
       drumName: getDrumName(note.midi),
       hit: null,
     })).filter(n => n.drumName !== null)
 
-  }, [song])
+    // reset hit states when song reloads
+    notesRef.current = notesRef.current.map(n => ({ ...n, hit: null }))
+  }, [song, midiOffset])
 
-  // Start playing the song and audio
   async function startSong() {
     if (!song) return
 
-    // Start visual playback
-    startTimeRef.current = nowSeconds()
+    // reset all note hit states before starting
+    notesRef.current = notesRef.current.map(n => ({ ...n, hit: null }))
+
+    // create and play the MP3
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+
+    const audio = new Audio('/src/assets/songs/another-one.mp3')
+    audioRef.current = audio
+
+    // wait for audio to be ready then play
+    await new Promise((resolve) => {
+      audio.oncanplaythrough = resolve
+      audio.load()
+    })
+
+    audio.play()
+
+    // record the exact start time for syncing notes
+    startTimeRef.current = performance.now() / 1000
+
     setPlaying(true)
     animate()
-
-    // Initialize Tone.PolySynth
-    if (!synthRef.current) {
-      synthRef.current = new Tone.PolySynth(Tone.Synth).toDestination()
-      await Tone.start()
-    }
-
-    const synth = synthRef.current
-    const now = Tone.now()
-
-    // Schedule MIDI notes for playback
-    song.tracks.forEach(track => {
-      track.notes.forEach(note => {
-        synth.triggerAttackRelease(Tone.Frequency(note.midi, 'midi').toNote(), note.duration, now + note.time)
-      })
-    })
   }
 
-  // Stop playing the song
   function stopSong() {
     setPlaying(false)
-    if (animationRef.current) cancelAnimationFrame(animationRef.current)
 
-    // Dispose the synth to stop all sounds
-    if (synthRef.current) {
-      synthRef.current.disconnect()
-      synthRef.current.dispose()
-      synthRef.current = null
+    // stop animation
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current)
+      animationRef.current = null
+    }
+
+    // stop audio
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current = null
     }
   }
 
-  // Animate the drum notes on the canvas
   function animate() {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
-    const elapsed = nowSeconds() - startTimeRef.current
 
-    // Clear the canvas
+    // use audio currentTime for perfect sync instead of performance.now
+    // this way if audio lags the notes lag with it
+    const elapsed = audioRef.current
+      ? audioRef.current.currentTime
+      : performance.now() / 1000 - startTimeRef.current
+
+    // clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // Draw the background and lanes
+    // draw dark background
     ctx.fillStyle = '#1a1a2e'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
+    // draw lanes
     LANES.forEach((lane, i) => {
       const y = i * LANE_HEIGHT
 
+      // alternating lane colors
       ctx.fillStyle = i % 2 === 0 ? '#16213e' : '#0f3460'
       ctx.fillRect(0, y, canvas.width, LANE_HEIGHT)
 
+      // lane label
       ctx.fillStyle = '#aaaaaa'
       ctx.font = '12px monospace'
       ctx.fillText(lane, 5, y + LANE_HEIGHT / 2 + 4)
     })
 
-    // Draw the hit line
+    // draw the green hit line
     ctx.strokeStyle = '#00ff88'
     ctx.lineWidth = 2
     ctx.beginPath()
@@ -151,17 +151,20 @@ export default function SongPlayer({ song, drumHits }) {
     ctx.lineTo(HIT_LINE_X, LANES.length * LANE_HEIGHT)
     ctx.stroke()
 
-    // Draw the notes
+    // draw notes
     notesRef.current.forEach(note => {
       const laneIndex = LANES.indexOf(note.drumName)
       if (laneIndex === -1) return
 
+      // x position based on time difference from now
       const x = HIT_LINE_X + (note.time - elapsed) * SCROLL_SPEED
 
+      // only draw notes visible on screen
       if (x < -NOTE_WIDTH || x > canvas.width) return
 
       const y = laneIndex * LANE_HEIGHT + 8
 
+      // color based on whether it was hit correctly or missed
       if (note.hit === 'correct') {
         ctx.fillStyle = '#00ff88'
       } else if (note.hit === 'missed') {
@@ -175,24 +178,45 @@ export default function SongPlayer({ song, drumHits }) {
       ctx.fill()
     })
 
+    // mark notes as missed if they passed the hit line by more than 300ms
+    notesRef.current = notesRef.current.map(note => {
+      if (note.hit !== null) return note
+      if (elapsed - note.time > 0.3) {
+        return { ...note, hit: 'missed' }
+      }
+      return note
+    })
+
     animationRef.current = requestAnimationFrame(animate)
   }
 
-  // Check for drum hits and mark notes as correct or missed
+  // check drum hits against expected notes
   useEffect(() => {
-    if (!playing || drumHits.length === 0) return
+    if (!playing || drumHits.length === 0 || !audioRef.current) return
 
     const lastHit = drumHits[0]
-    const elapsed = nowSeconds() - startTimeRef.current
+    const elapsed = audioRef.current.currentTime
     const tolerance = 0.3
+
+    // first check if the hit drum has a correct note within tolerance
+    const hasCorrectHit = notesRef.current.some(note =>
+      note.hit === null &&
+      note.drumName === lastHit.drumName &&
+      Math.abs(note.time - elapsed) < tolerance
+    )
 
     notesRef.current = notesRef.current.map(note => {
       if (note.hit !== null) return note
-      if (note.drumName !== lastHit.drumName) return note
 
       const diff = Math.abs(note.time - elapsed)
-      if (diff < tolerance) {
+      if (diff >= tolerance) return note
+
+      if (note.drumName === lastHit.drumName) {
+        // correct drum, correct timing
         return { ...note, hit: 'correct' }
+      } else if (!hasCorrectHit) {
+        // wrong drum hit at this moment — mark this expected note as missed
+        return { ...note, hit: 'missed' }
       }
       return note
     })
@@ -201,21 +225,48 @@ export default function SongPlayer({ song, drumHits }) {
   return (
     <div style={{ padding: '20px', fontFamily: 'monospace' }}>
       <div style={{ marginBottom: '10px', display: 'flex', gap: '10px' }}>
-        <button onClick={startSong} disabled={playing || !song} style={{ padding: '10px 20px', cursor: 'pointer' }}>
+        <button
+          onClick={startSong}
+          disabled={playing || !song}
+          style={{ padding: '10px 20px', cursor: 'pointer' }}
+        >
           ▶ Play
         </button>
-        <button onClick={stopSong} disabled={!playing} style={{ padding: '10px 20px', cursor: 'pointer' }}>
+        <button
+          onClick={stopSong}
+          disabled={!playing}
+          style={{ padding: '10px 20px', cursor: 'pointer' }}
+        >
           ■ Stop
         </button>
       </div>
 
-      {/* Canvas for visualizing drum notes */}
       <canvas
         ref={canvasRef}
         width={900}
         height={LANES.length * LANE_HEIGHT}
         style={{ border: '1px solid #333', display: 'block' }}
       />
+
+      <div style={{
+        width: 900,
+        marginTop: '6px',
+        background: '#0d0d1a',
+        border: '1px solid #333',
+        borderRadius: '4px',
+        padding: '6px 10px',
+        fontFamily: 'monospace',
+        fontSize: '12px',
+      }}>
+        {drumHits.slice(0, 5).map((hit, i) => (
+          <div key={i} style={{ color: i === 0 ? '#00ff88' : '#666', lineHeight: '1.6' }}>
+            [{hit.time}] {hit.drumName} | vel: {hit.velocity}
+          </div>
+        ))}
+        {drumHits.length === 0 && (
+          <div style={{ color: '#444' }}>No hits yet...</div>
+        )}
+      </div>
     </div>
   )
 }

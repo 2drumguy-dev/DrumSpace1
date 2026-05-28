@@ -21,6 +21,7 @@ const DRUM_MAP = {
 function App() {
   // State variables for song, MIDI connection, drum hits, and status
   const [song, setSong] = useState(null)
+  const [midiOffset, setMidiOffset] = useState(0)
   const midiRef = useRef(null)
   const [connected, setConnected] = useState(false)
   const [hits, setHits] = useState([])
@@ -33,7 +34,24 @@ function App() {
       .then(buffer => {
         const midi = new Midi(buffer)
         setSong(midi)
+
+        // find the time of the very first note across all tracks
+        let firstNoteTime = Infinity
+        midi.tracks.forEach(track => {
+          track.notes.forEach(note => {
+            if (note.time < firstNoteTime) firstNoteTime = note.time
+          })
+        })
+        console.log('First note starts at:', firstNoteTime, 'seconds')
+        setMidiOffset(firstNoteTime === Infinity ? 0 : firstNoteTime)
+
+        // midi.tracks.forEach((track, i) => {
+        //   console.log(`Track ${i}:`, track.name, '| instrument:', track.instrument.number, '| family:', track.instrument.family)
+        // })
       })
+
+
+
   }, [])
 
   // Connect to the drum kit via MIDI
@@ -101,26 +119,8 @@ function App() {
         </button>
       </div>
 
-      {/* Display the list of drum hits */}
-      <div style={{ marginTop: '10px' }}>
-        {hits.map((hit, i) => (
-          <div
-            key={i}
-            style={{
-              padding: '6px 10px',
-              marginBottom: '4px',
-              background: i === 0 ? '#1a1a2e' : '#f5f5f5',
-              color: i === 0 ? '#00ff88' : '#333',
-              borderRadius: '4px'
-            }}
-          >
-            [{hit.time}] 🥁 {hit.drumName} | velocity: {hit.velocity}
-          </div>
-        ))}
-      </div>
-
       {/* Render the SongPlayer component */}
-      <SongPlayer song={song} drumHits={hits} />
+      <SongPlayer song={song} drumHits={hits} midiOffset={midiOffset} />
     </div>
   )
 }
